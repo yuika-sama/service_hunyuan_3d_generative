@@ -18,6 +18,7 @@ A model worker executes the model.
 import argparse
 import asyncio
 import base64
+import hmac
 import logging
 import logging.handlers
 import os
@@ -32,7 +33,7 @@ import torch
 import trimesh
 import uvicorn
 from PIL import Image
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, FileResponse
 
 from hy3dgen.rembg import BackgroundRemover
@@ -328,7 +329,16 @@ app.add_middleware(
 )
 
 
-@app.post("/generate")
+async def require_api_key(request: Request):
+    key = os.getenv("GATEWAY_API_KEY")
+    if not key:
+        raise HTTPException(503, "Set GATEWAY_API_KEY before using the 3D service")
+    authorization = request.headers.get("authorization", "")
+    if not hmac.compare_digest(authorization.encode(), f"Bearer {key}".encode()):
+        raise HTTPException(401, "Invalid service credentials")
+
+
+@app.post("/generate", dependencies=[Depends(require_api_key)])
 async def generate(request: Request):
     logger.info("Worker generating...")
     params = await request.json()
@@ -361,7 +371,7 @@ async def generate(request: Request):
         return JSONResponse(ret, status_code=404)
 
 
-@app.post("/send")
+@app.post("/send", dependencies=[Depends(require_api_key)])
 async def generate(request: Request):
     logger.info("Worker send...")
     params = await request.json()

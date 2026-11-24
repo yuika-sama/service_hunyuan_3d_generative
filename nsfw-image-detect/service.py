@@ -1,5 +1,8 @@
 # service.py
-from fastapi import FastAPI, File, UploadFile
+import hmac
+import os
+
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
 import io, torch
@@ -44,7 +47,16 @@ def classify(image_bytes: bytes):
     top_label = max(scores, key=scores.get)
     return {"scores": scores, "top_label": top_label, "is_nsfw": is_nsfw}
 
-@app.post("/analyze")
+async def require_api_key(request: Request):
+    key = os.getenv("GATEWAY_API_KEY")
+    if not key:
+        raise HTTPException(503, "Set GATEWAY_API_KEY before using the NSFW service")
+    authorization = request.headers.get("authorization", "")
+    if not hmac.compare_digest(authorization.encode(), f"Bearer {key}".encode()):
+        raise HTTPException(401, "Invalid service credentials")
+
+
+@app.post("/analyze", dependencies=[Depends(require_api_key)])
 async def analyze(image: UploadFile = File(...)):
     data = await image.read()
     try:

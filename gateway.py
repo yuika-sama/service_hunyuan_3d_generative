@@ -69,13 +69,19 @@ async def _post_json(client: httpx.AsyncClient, url: str, service: str, **kwargs
         raise HTTPException(502, f"{service} service returned an invalid response") from exc
 
 
+async def _analyze_image(client, image, data):
+    return await _post_json(
+        client, NSFW_URL, "NSFW",
+        headers={"Authorization": f"Bearer {os.getenv('GATEWAY_API_KEY', '')}"},
+        files={"image": (image.filename or "image.png", data, image.content_type)},
+    )
+
+
 @app.post("/analyze")
 async def analyze(image: UploadFile = File(...)):
     data = await read_image(image)
     async with httpx.AsyncClient(timeout=60.0) as client:
-        result = await _post_json(client, NSFW_URL, "NSFW", files={
-            "image": (image.filename or "image.png", data, image.content_type),
-        })
+        result = await _analyze_image(client, image, data)
     return JSONResponse(result)
 
 
@@ -90,9 +96,7 @@ async def generate_checked(image, texture_image):
         if has_texture:
             sources.append((texture_image, texture_bytes, "texture_moderation"))
         for upload, data, stage in sources:
-            result = await _post_json(client, NSFW_URL, "NSFW", files={
-                "image": (upload.filename or "image.png", data, upload.content_type),
-            })
+            result = await _analyze_image(client, upload, data)
             if result["is_nsfw"]:
                 raise HTTPException(400, {"stage": stage, "error": "Image violates NSFW policy", "details": result})
             results.append(result)
@@ -103,7 +107,7 @@ async def generate_checked(image, texture_image):
                 "texture": True,
                 "texture_resolution": 2048,
                 "bake_exp": 4,
-            })
+            }, headers={"Authorization": f"Bearer {os.getenv('GATEWAY_API_KEY', '')}"})
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise HTTPException(502, "3D service failed") from exc
